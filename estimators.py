@@ -1,11 +1,8 @@
 import pandas as pd
-import numpy as np
 import copy
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics.pairwise import euclidean_distances, manhattan_distances
-from distance_functions import hamming_distance
 
 
 class Estimator:
@@ -83,7 +80,11 @@ class CovariateAdjustment(Estimator):
 
 
 class Matching(Estimator):
-    name = "Matching"
+    name = "Matching - "
+
+    def __init__(self, distance_function):
+        self.distance_function = distance_function
+        self.name += distance_function.__name__
 
     def estimate(self, x: pd.DataFrame, y: pd.DataFrame) -> int:
         couples = self.match(x)
@@ -98,7 +99,6 @@ class Matching(Estimator):
         t1_indices = x[x['T'] == 1].index
 
         x_without_t = x.loc[:, x.columns != 'T']
-        distances_df = pd.DataFrame(euclidean_distances(x_without_t)).loc[t1_indices, t0_indices]
-        min_values = distances_df.min(axis=1)
-        matchings = distances_df.idxmin(axis=1)
-        return matchings
+        distances_df = pd.DataFrame(self.distance_function(x_without_t)).loc[t1_indices, t0_indices]
+        couples = distances_df.idxmin(axis=1)
+        return couples

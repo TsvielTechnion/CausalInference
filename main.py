@@ -1,14 +1,13 @@
 import pandas as pd
 from estimators import IPW, CovariateAdjustment, Matching
+from sklearn.metrics.pairwise import euclidean_distances, manhattan_distances
+from distance_functions import hamming_distance
 
 
 def preprocess_data(data: pd.DataFrame):
     # Remove sample id column
     data.drop(columns='Unnamed: 0', inplace=True)
     # categorize features
-    # data['x_2'] = data['x_2'].astype('category').cat.codes
-    # data['x_24'] = data['x_24'].astype('category').cat.codes
-    # data['x_21'] = data['x_21'].astype('category').cat.codes
     data = pd.get_dummies(data)
     y = data['Y']
     x = data.loc[:, data.columns != 'Y']
@@ -25,7 +24,9 @@ if __name__ == "__main__":
                 CovariateAdjustment(learner='s'),
                 CovariateAdjustment(learner='t'),
                 IPW(),
-                Matching()
+                Matching(manhattan_distances),
+                Matching(euclidean_distances),
+                Matching(hamming_distance)
                 ]
     for l in learners:
         att = l.estimate(x1, y1)
