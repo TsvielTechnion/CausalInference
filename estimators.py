@@ -4,6 +4,8 @@ import copy
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LinearRegression
+from sklearn.metrics.pairwise import euclidean_distances, manhattan_distances
+from distance_functions import hamming_distance
 
 
 class Estimator:
@@ -14,7 +16,7 @@ class Estimator:
 class IPW(Estimator):
     name = "IPW"
 
-    def estimate(self, x:pd.DataFrame, y: pd.DataFrame) -> int:
+    def estimate(self, x: pd.DataFrame, y: pd.DataFrame) -> int:
         p_scores = self.estimate_propensity(x)
         t = x['T'].to_numpy()
         y = y.to_numpy()
@@ -78,3 +80,25 @@ class CovariateAdjustment(Estimator):
         y_hat_0 = predictor0.predict(x_t1_0)
         y_hat_1 = predictor1.predict(x_t1)
         return (y_hat_1 - y_hat_0).mean()
+
+
+class Matching(Estimator):
+    name = "Matching"
+
+    def estimate(self, x: pd.DataFrame, y: pd.DataFrame) -> int:
+        couples = self.match(x)
+        sum = 0
+        for t1, t0_couple in couples.iteritems():
+            sum = sum + (y[t1] - y[t0_couple])
+
+        return sum / len(couples)
+
+    def match(self, x: pd.DataFrame):
+        t0_indices = x[x['T'] == 0].index
+        t1_indices = x[x['T'] == 1].index
+
+        x_without_t = x.loc[:, x.columns != 'T']
+        distances_df = pd.DataFrame(euclidean_distances(x_without_t)).loc[t1_indices, t0_indices]
+        min_values = distances_df.min(axis=1)
+        matchings = distances_df.idxmin(axis=1)
+        return matchings
