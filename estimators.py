@@ -3,6 +3,7 @@ import copy
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LinearRegression
+from random import randint
 
 
 class Estimator:
@@ -18,17 +19,18 @@ class IPW(Estimator):
         t = x['T'].to_numpy()
         y = y.to_numpy()
         p_scores_ratio = p_scores[:, 1] / p_scores[:, 0]
-
         sigma_T = t.sum()
         sigma_ti_yi = (t * y).sum()
         sigma_minus_ti_y1 = ((1 - t) * y * p_scores_ratio).sum()
         sigma_minus_ti = ((1 - t) * p_scores_ratio).sum()
-        return sigma_ti_yi / sigma_T - sigma_minus_ti_y1 / sigma_minus_ti
+        return sigma_ti_yi / sigma_T - sigma_minus_ti_y1 / sigma_minus_ti, p_scores
 
     def estimate_propensity(self, x: pd.DataFrame):
+        value = randint(30, 100)
+        depth = randint(5,10)
         t = x['T'].to_numpy()
         features = x.loc[:, x.columns != 'T'].to_numpy()
-        classifier = RandomForestClassifier(n_estimators=20, max_depth=5).fit(X=features, y=t)
+        classifier = RandomForestClassifier(n_estimators=value, max_depth=depth).fit(X=features, y=t)
         return classifier.predict_proba(features)
 
 
