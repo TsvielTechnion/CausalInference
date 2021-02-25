@@ -4,6 +4,7 @@ from sklearn.metrics.pairwise import euclidean_distances, manhattan_distances
 from distance_functions import hamming_distance
 import numpy as np
 
+
 def preprocess_data(data: pd.DataFrame):
     # Remove sample id column
     data.drop(columns='Unnamed: 0', inplace=True)
