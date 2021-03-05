@@ -23,7 +23,7 @@ class IPW(Estimator):
         sigma_ti_yi = (t * y).sum()
         sigma_minus_ti_y1 = ((1 - t) * y * p_scores_ratio).sum()
         sigma_minus_ti = ((1 - t) * p_scores_ratio).sum()
-        return sigma_ti_yi / sigma_T - sigma_minus_ti_y1 / sigma_minus_ti, p_scores
+        return sigma_ti_yi / sigma_T - sigma_minus_ti_y1 / sigma_minus_ti
 
     def estimate_propensity(self, x: pd.DataFrame):
         value = randint(30, 100)
