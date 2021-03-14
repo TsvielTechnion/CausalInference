@@ -2,20 +2,23 @@ import pandas as pd
 import copy
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, LogisticRegressionCV
 from random import randint
 
 
 class Estimator:
-    def estimate(self, x:pd.DataFrame, y: pd.DataFrame) -> int:
+    def estimate(self, x: pd.DataFrame, y: pd.DataFrame) -> int:
         ...
 
 
 class IPW(Estimator):
     name = "IPW"
 
+    def __init__(self, x: pd.DataFrame):
+        self.p_scores = self.estimate_propensity(x)
+
     def estimate(self, x: pd.DataFrame, y: pd.DataFrame) -> int:
-        p_scores = self.estimate_propensity(x)
+        p_scores = self.p_scores[x.index]
         t = x['T'].to_numpy()
         y = y.to_numpy()
         p_scores_ratio = p_scores[:, 1] / p_scores[:, 0]
@@ -23,11 +26,11 @@ class IPW(Estimator):
         sigma_ti_yi = (t * y).sum()
         sigma_minus_ti_y1 = ((1 - t) * y * p_scores_ratio).sum()
         sigma_minus_ti = ((1 - t) * p_scores_ratio).sum()
-        return sigma_ti_yi / sigma_T - sigma_minus_ti_y1 / sigma_minus_ti
+        return (sigma_ti_yi / sigma_T) / (sigma_minus_ti_y1 / sigma_minus_ti)
 
     def estimate_propensity(self, x: pd.DataFrame):
         value = randint(30, 100)
-        depth = randint(5,10)
+        depth = randint(5, 10)
         t = x['T'].to_numpy()
         features = x.loc[:, x.columns != 'T'].to_numpy()
         classifier = RandomForestClassifier(n_estimators=value, max_depth=depth).fit(X=features, y=t)
@@ -59,10 +62,10 @@ class CovariateAdjustment(Estimator):
         features = x.to_numpy()
         y_all = y.to_numpy()
 
-        predictor = LinearRegression(normalize=True).fit(X=features, y=y_all)
-        y_hat_0 = predictor.predict(x_t1_0)
-        y_hat_1 = predictor.predict(x_t1)
-        return (y_hat_1 - y_hat_0).mean()
+        predictor = LogisticRegressionCV(max_iter=10_000).fit(X=features, y=y_all)
+        y_hat_0 = predictor.predict_proba(x_t1_0)[:, 1]
+        y_hat_1 = predictor.predict_proba(x_t1)[:, 1]
+        return (y_hat_1 / y_hat_0).mean()
 
     def t_learner(self, x:pd.DataFrame, y: pd.DataFrame) -> int:
         x_t1 = x[x['T'] == 1]
@@ -73,12 +76,12 @@ class CovariateAdjustment(Estimator):
         x_t1_0 = copy.deepcopy(x_t1)
         x_t1_0['T'] = 0
 
-        predictor0 = LinearRegression(normalize=True).fit(X=x_t0.to_numpy(), y=y_t0)
-        predictor1 = LinearRegression(normalize=True).fit(X=x_t1.to_numpy(), y=y_t1)
+        predictor0 = LogisticRegressionCV(max_iter=10_000).fit(X=x_t0.to_numpy(), y=y_t0)
+        predictor1 = LogisticRegressionCV(max_iter=10_000).fit(X=x_t1.to_numpy(), y=y_t1)
 
-        y_hat_0 = predictor0.predict(x_t1_0)
-        y_hat_1 = predictor1.predict(x_t1)
-        return (y_hat_1 - y_hat_0).mean()
+        y_hat_0 = predictor0.predict_proba(x_t1_0)[:, 1]
+        y_hat_1 = predictor1.predict_proba(x_t1)[:, 1]
+        return (y_hat_1 / y_hat_0).mean()
 
 
 class Matching(Estimator):
@@ -89,10 +92,12 @@ class Matching(Estimator):
         self.name += distance_function.__name__
 
     def estimate(self, x: pd.DataFrame, y: pd.DataFrame) -> int:
+        predictor = LogisticRegressionCV(max_iter=10_000).fit(X=x, y=y)
+        y = predictor.predict_proba(x)[:, 1]
         couples = self.match(x)
         sum = 0
         for t1, t0_couple in couples.iteritems():
-            sum = sum + (y[t1] - y[t0_couple])
+            sum = sum + (y[t1] / y[t0_couple])
 
         return sum / len(couples)
 

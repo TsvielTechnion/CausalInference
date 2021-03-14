@@ -1,10 +1,10 @@
 import pandas as pd
-import numpy as np
 
 from read_NSDUH import Read, Codes
 from estimators import IPW, CovariateAdjustment, Matching
 from sklearn.metrics.pairwise import euclidean_distances, manhattan_distances
-from distance_functions import hamming_distance
+
+OVERLAP_PCT = .9
 
 
 def preprocess_data(data: pd.DataFrame):
@@ -24,14 +24,19 @@ if __name__ == "__main__":
     reader = Read(file_path="NSDUH_2019.parquet")
     data = reader.read().loc[:, :].reset_index(drop=True)
 
-    x1 = data.loc[:, ~data.columns.isin(Codes.outcomes.values())]
+    x = data.loc[:, ~data.columns.isin(Codes.outcomes.values())]
+    ipw = IPW(x=x)
+    p_scores = pd.DataFrame(ipw.p_scores)
+    only_overlapped_data = p_scores[(p_scores[0] < OVERLAP_PCT) & (p_scores[1] < OVERLAP_PCT)]
 
-    methods = [IPW(),
+    x1 = x.loc[only_overlapped_data.index].reset_index()
+    data = data.loc[only_overlapped_data.index].reset_index()
+
+    methods = [ipw,
                CovariateAdjustment(learner='s'),
                CovariateAdjustment(learner='t'),
                Matching(euclidean_distances),
                Matching(manhattan_distances),
-               Matching(hamming_distance),
                ]
 
     for outcome in Codes.outcomes.values():
