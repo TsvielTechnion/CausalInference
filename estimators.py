@@ -1,9 +1,9 @@
 import pandas as pd
+import numpy as np
 import copy
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LinearRegression, LogisticRegressionCV
-from random import randint
 
 
 class Estimator:
@@ -29,11 +29,11 @@ class IPW(Estimator):
         return (sigma_ti_yi / sigma_T) / (sigma_minus_ti_y1 / sigma_minus_ti)
 
     def estimate_propensity(self, x: pd.DataFrame):
-        value = randint(30, 100)
-        depth = randint(5, 10)
+        trees = 90
+        depth = 15
         t = x['T'].to_numpy()
         features = x.loc[:, x.columns != 'T'].to_numpy()
-        classifier = RandomForestClassifier(n_estimators=value, max_depth=depth).fit(X=features, y=t)
+        classifier = RandomForestClassifier(n_estimators=trees, max_depth=depth).fit(X=features, y=t)
         return classifier.predict_proba(features)
 
 
@@ -65,7 +65,9 @@ class CovariateAdjustment(Estimator):
         predictor = LogisticRegressionCV(max_iter=10_000).fit(X=features, y=y_all)
         y_hat_0 = predictor.predict_proba(x_t1_0)[:, 1]
         y_hat_1 = predictor.predict_proba(x_t1)[:, 1]
-        return (y_hat_1 / y_hat_0).mean()
+
+        ratios =  y_hat_1 / y_hat_0
+        return ratios.mean(), ratios.std()
 
     def t_learner(self, x:pd.DataFrame, y: pd.DataFrame) -> int:
         x_t1 = x[x['T'] == 1]
@@ -81,7 +83,9 @@ class CovariateAdjustment(Estimator):
 
         y_hat_0 = predictor0.predict_proba(x_t1_0)[:, 1]
         y_hat_1 = predictor1.predict_proba(x_t1)[:, 1]
-        return (y_hat_1 / y_hat_0).mean()
+
+        ratios =  y_hat_1 / y_hat_0
+        return ratios.mean(), ratios.std()
 
 
 class Matching(Estimator):
@@ -95,11 +99,13 @@ class Matching(Estimator):
         predictor = LogisticRegressionCV(max_iter=10_000).fit(X=x, y=y)
         y = predictor.predict_proba(x)[:, 1]
         couples = self.match(x)
-        sum = 0
-        for t1, t0_couple in couples.iteritems():
-            sum = sum + (y[t1] / y[t0_couple])
 
-        return sum / len(couples)
+        ratios = []
+        for t1, t0_couple in couples.iteritems():
+            ratios.append(y[t1] / y[t0_couple])
+
+        ratios = np.array(ratios)
+        return ratios.mean(), ratios.std()
 
     def match(self, x: pd.DataFrame):
         t0_indices = x[x['T'] == 0].index
