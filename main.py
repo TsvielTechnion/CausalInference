@@ -30,19 +30,34 @@ if __name__ == "__main__":
     only_overlapped_data = p_scores[(p_scores[0] < OVERLAP_PCT) & (p_scores[1] < OVERLAP_PCT)]
 
     x1 = x.loc[only_overlapped_data.index].reset_index()
-    data = data.loc[only_overlapped_data.index].reset_index()
+    y = data.loc[only_overlapped_data.index].reset_index()
 
-    methods = [ipw,
-               CovariateAdjustment(learner='s'),
-               CovariateAdjustment(learner='t'),
-               Matching(euclidean_distances),
-               Matching(manhattan_distances),
-               ]
+    filtered_methods = [
+        CovariateAdjustment(learner='s'),
+        CovariateAdjustment(learner='t'),
+    ]
+    unfiltered_methods = [
+        Matching(euclidean_distances),
+        Matching(manhattan_distances),
+    ]
 
     for outcome in Codes.outcomes.values():
         print(f"------{outcome}------")
-        y1 = data[outcome]
-        for method in methods:
-            result = method.estimate(x1, y1)
-            print({method.name: f"{round(100 * result, 2)}%"})
+        y1 = y[outcome]
+        for method in filtered_methods:
+            mean, std = method.estimate(x1, y1)
+            print({method.name: {
+                "mean": round(mean, 2),
+                "std": std
+            }})
+
+        x0 = x
+        y0 = data[outcome]
+        for method in unfiltered_methods:
+            mean, std = method.estimate(x0, y0)
+            print({method.name: {
+                "mean": round(mean, 2),
+                "std": std
+            }})
+
         print(f"---------------------------")
