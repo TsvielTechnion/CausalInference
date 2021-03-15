@@ -3,7 +3,7 @@ import numpy as np
 import copy
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LinearRegression, LogisticRegressionCV
+from sklearn.linear_model import LinearRegression, LogisticRegression, LogisticRegressionCV
 
 
 class Estimator:
@@ -26,7 +26,7 @@ class IPW(Estimator):
         sigma_ti_yi = (t * y).sum()
         sigma_minus_ti_y1 = ((1 - t) * y * p_scores_ratio).sum()
         sigma_minus_ti = ((1 - t) * p_scores_ratio).sum()
-        return (sigma_ti_yi / sigma_T) / (sigma_minus_ti_y1 / sigma_minus_ti)
+        return (sigma_ti_yi / sigma_T) / (sigma_minus_ti_y1 / sigma_minus_ti), -1
 
     def estimate_propensity(self, x: pd.DataFrame):
         trees = 90
@@ -34,6 +34,7 @@ class IPW(Estimator):
         t = x['T'].to_numpy()
         features = x.loc[:, x.columns != 'T'].to_numpy()
         classifier = RandomForestClassifier(n_estimators=trees, max_depth=depth).fit(X=features, y=t)
+        # classifier = LogisticRegression(max_iter=10_000).fit(X=features, y=t)
         return classifier.predict_proba(features)
 
 
@@ -54,19 +55,21 @@ class CovariateAdjustment(Estimator):
         ...
 
     def s_learner(self, x: pd.DataFrame, y: pd.DataFrame) -> int:
-        x_t1 = x[x['T'] == 1]
+        columns = list(x.columns)
+        columns.remove('T')
 
+        x_t1 = x[x['T'] == 1]
         x_t1_0 = copy.deepcopy(x_t1)
         x_t1_0['T'] = 0
 
         features = x.to_numpy()
         y_all = y.to_numpy()
+        predictor = RandomForestClassifier(max_depth=15, n_estimators=90).fit(X=features, y=y_all)
 
-        predictor = LogisticRegressionCV(max_iter=10_000).fit(X=features, y=y_all)
-        y_hat_0 = predictor.predict_proba(x_t1_0)[:, 1]
-        y_hat_1 = predictor.predict_proba(x_t1)[:, 1]
+        y_hat_0 = predictor.predict_proba(x_t1_0)[:, 1] / predictor.predict_proba(x_t1_0)[:, 0]
+        y_hat_1 = predictor.predict_proba(x_t1)[:, 1] / predictor.predict_proba(x_t1)[:, 0]
 
-        ratios =  y_hat_1 / y_hat_0
+        ratios = y_hat_1 / y_hat_0
         return ratios.mean(), ratios.std()
 
     def t_learner(self, x:pd.DataFrame, y: pd.DataFrame) -> int:
@@ -78,31 +81,35 @@ class CovariateAdjustment(Estimator):
         x_t1_0 = copy.deepcopy(x_t1)
         x_t1_0['T'] = 0
 
-        predictor0 = LogisticRegressionCV(max_iter=10_000).fit(X=x_t0.to_numpy(), y=y_t0)
-        predictor1 = LogisticRegressionCV(max_iter=10_000).fit(X=x_t1.to_numpy(), y=y_t1)
+        predictor0 = RandomForestClassifier(max_depth=15, n_estimators=90).fit(X=x_t0.to_numpy(), y=y_t0)
+        predictor1 = RandomForestClassifier(max_depth=15, n_estimators=90).fit(X=x_t1.to_numpy(), y=y_t1)
 
-        y_hat_0 = predictor0.predict_proba(x_t1_0)[:, 1]
-        y_hat_1 = predictor1.predict_proba(x_t1)[:, 1]
+        y_hat_0 = predictor0.predict_proba(x_t1_0)[:, 1] / predictor0.predict_proba(x_t1_0)[:, 0]
+        y_hat_1 = predictor1.predict_proba(x_t1)[:, 1] / predictor1.predict_proba(x_t1)[:, 0]
 
-        ratios =  y_hat_1 / y_hat_0
+        ratios = y_hat_1 / y_hat_0
         return ratios.mean(), ratios.std()
 
 
 class Matching(Estimator):
     name = "Matching - "
 
-    def __init__(self, distance_function):
+    def __init__(self, distance_function, match_subset=None):
         self.distance_function = distance_function
         self.name += distance_function.__name__
+        self._dis_mat = None
+        self._balance = None
+        self.match_subset = match_subset
 
     def estimate(self, x: pd.DataFrame, y: pd.DataFrame) -> int:
-        predictor = LogisticRegressionCV(max_iter=10_000).fit(X=x, y=y)
-        y = predictor.predict_proba(x)[:, 1]
+        predictor = RandomForestClassifier(max_depth=15, n_estimators=90).fit(X=x, y=y)
+        y = predictor.predict_proba(x)
         couples = self.match(x)
+        self._calc_balance(couples=couples, x=x)
 
         ratios = []
         for t1, t0_couple in couples.iteritems():
-            ratios.append(y[t1] / y[t0_couple])
+            ratios.append((y[t1][1] / y[t1][0]) / (y[t0_couple][1] / y[t0_couple][0]))
 
         ratios = np.array(ratios)
         return ratios.mean(), ratios.std()
@@ -112,6 +119,29 @@ class Matching(Estimator):
         t1_indices = x[x['T'] == 1].index
 
         x_without_t = x.loc[:, x.columns != 'T']
-        distances_df = pd.DataFrame(self.distance_function(x_without_t)).loc[t1_indices, t0_indices]
+        distances_df = pd.DataFrame(self.distance_matrix(x_without_t)).loc[t1_indices, t0_indices]
         couples = distances_df.idxmin(axis=1)
         return couples
+
+    def distance_matrix(self, x):
+        if self._dis_mat is None:
+            x_subset = x[self.match_subset] if self.match_subset else x
+            self._dis_mat = self.distance_function(x_subset)
+        return self._dis_mat
+
+    def _calc_balance(self, couples, x):
+        if self._balance is not None:
+            return
+        t1_idx = list(couples.index)
+        t0_idx = list(couples.values)
+        df_t1 = x.loc[t1_idx]
+        df_t0 = x.loc[t0_idx]
+        balance = []
+        for c in df_t0.columns:
+            balance.append(df_t0[c].value_counts())
+            balance.append(df_t1[c].value_counts())
+
+        balance_df = pd.DataFrame(balance)
+        balance_df = balance_df / balance_df.sum(axis=1)[:, None]
+        balance_df.to_csv(f"Balance_{self.name}.csv")
+        self._balance = 1

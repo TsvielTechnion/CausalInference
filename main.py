@@ -3,18 +3,10 @@ import pandas as pd
 from read_NSDUH import Read, Codes
 from estimators import IPW, CovariateAdjustment, Matching
 from sklearn.metrics.pairwise import euclidean_distances, manhattan_distances
+from distance_functions import hamming_distance
+from read_NSDUH import Codes
 
-OVERLAP_PCT = .9
-
-
-def preprocess_data(data: pd.DataFrame):
-    # Remove sample id column
-    data.drop(columns='Unnamed: 0', inplace=True)
-    # categorize features
-    data = pd.get_dummies(data)
-    y = data['Y']
-    x = data.loc[:, data.columns != 'Y']
-    return x, y
+OVERLAP_PCT = 95
 
 
 if __name__ == "__main__":
@@ -29,16 +21,17 @@ if __name__ == "__main__":
     p_scores = pd.DataFrame(ipw.p_scores)
     only_overlapped_data = p_scores[(p_scores[0] < OVERLAP_PCT) & (p_scores[1] < OVERLAP_PCT)]
 
-    x1 = x.loc[only_overlapped_data.index].reset_index()
-    y = data.loc[only_overlapped_data.index].reset_index()
+    x1 = x.loc[only_overlapped_data.index]
+    y = data.loc[only_overlapped_data.index]
 
     filtered_methods = [
         CovariateAdjustment(learner='s'),
         CovariateAdjustment(learner='t'),
     ]
     unfiltered_methods = [
-        Matching(euclidean_distances),
-        Matching(manhattan_distances),
+        Matching(hamming_distance, Codes.non_psy_drugs.values()),
+        Matching(hamming_distance)
+
     ]
 
     for outcome in Codes.outcomes.values():
@@ -47,8 +40,8 @@ if __name__ == "__main__":
         for method in filtered_methods:
             mean, std = method.estimate(x1, y1)
             print({method.name: {
-                "mean": round(mean, 2),
-                "std": std
+                "mean": round(mean, 3),
+                "std": round(std, 3)
             }})
 
         x0 = x
@@ -56,8 +49,8 @@ if __name__ == "__main__":
         for method in unfiltered_methods:
             mean, std = method.estimate(x0, y0)
             print({method.name: {
-                "mean": round(mean, 2),
-                "std": std
+                "mean": round(mean, 3),
+                "std": round(std, 3)
             }})
 
         print(f"---------------------------")
