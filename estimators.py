@@ -33,8 +33,8 @@ class IPW(Estimator):
         depth = 15
         t = x['T'].to_numpy()
         features = x.loc[:, x.columns != 'T'].to_numpy()
-        classifier = RandomForestClassifier(n_estimators=trees, max_depth=depth).fit(X=features, y=t)
-        # classifier = LogisticRegression(max_iter=10_000).fit(X=features, y=t)
+        # classifier = RandomForestClassifier(n_estimators=trees, max_depth=depth).fit(X=features, y=t)
+        classifier = LogisticRegression(max_iter=10_000).fit(X=features, y=t)
         return classifier.predict_proba(features)
 
 
@@ -64,7 +64,7 @@ class CovariateAdjustment(Estimator):
 
         features = x.to_numpy()
         y_all = y.to_numpy()
-        predictor = RandomForestClassifier(max_depth=15, n_estimators=90).fit(X=features, y=y_all)
+        predictor = LogisticRegression(max_iter=10_000).fit(X=features, y=y_all)
 
         y_hat_0 = predictor.predict_proba(x_t1_0)[:, 1] / predictor.predict_proba(x_t1_0)[:, 0]
         y_hat_1 = predictor.predict_proba(x_t1)[:, 1] / predictor.predict_proba(x_t1)[:, 0]
@@ -81,8 +81,8 @@ class CovariateAdjustment(Estimator):
         x_t1_0 = copy.deepcopy(x_t1)
         x_t1_0['T'] = 0
 
-        predictor0 = RandomForestClassifier(max_depth=15, n_estimators=90).fit(X=x_t0.to_numpy(), y=y_t0)
-        predictor1 = RandomForestClassifier(max_depth=15, n_estimators=90).fit(X=x_t1.to_numpy(), y=y_t1)
+        predictor0 = LogisticRegression(max_iter=10_000).fit(X=x_t0.to_numpy(), y=y_t0)
+        predictor1 = LogisticRegression(max_iter=10_000).fit(X=x_t1.to_numpy(), y=y_t1)
 
         y_hat_0 = predictor0.predict_proba(x_t1_0)[:, 1] / predictor0.predict_proba(x_t1_0)[:, 0]
         y_hat_1 = predictor1.predict_proba(x_t1)[:, 1] / predictor1.predict_proba(x_t1)[:, 0]
@@ -92,24 +92,23 @@ class CovariateAdjustment(Estimator):
 
 
 class Matching(Estimator):
-    name = "Matching - "
+    name = "Matching 1-20"
 
     def __init__(self, distance_function, match_subset=None):
         self.distance_function = distance_function
-        self.name += distance_function.__name__
         self._dis_mat = None
         self._balance = None
         self.match_subset = match_subset
 
     def estimate(self, x: pd.DataFrame, y: pd.DataFrame) -> int:
-        predictor = RandomForestClassifier(max_depth=15, n_estimators=90).fit(X=x, y=y)
+        predictor = LogisticRegression(max_iter=10_000).fit(X=x, y=y)
         y = predictor.predict_proba(x)
         couples = self.match(x)
-        self._calc_balance(couples=couples, x=x)
+        # self._calc_balance(couples=couples, x=x)
 
         ratios = []
-        for t1, t0_couple in couples.iteritems():
-            ratios.append((y[t1][1] / y[t1][0]) / (y[t0_couple][1] / y[t0_couple][0]))
+        for t1, t0_couple in couples.items():
+            ratios.append((y[t1][1] / y[t1][0]) / (y[t0_couple][:, 1].mean() / y[t0_couple][: ,0].mean()))
 
         ratios = np.array(ratios)
         return ratios.mean(), ratios.std()
@@ -120,8 +119,14 @@ class Matching(Estimator):
 
         x_without_t = x.loc[:, x.columns != 'T']
         distances_df = pd.DataFrame(self.distance_matrix(x_without_t)).loc[t1_indices, t0_indices]
-        couples = distances_df.idxmin(axis=1)
-        return couples
+
+        t12group = {}
+        for i in distances_df.index:
+            r = distances_df.loc[i, :]
+            idx = r.sort_values()[:20]
+            t12group[i] = idx.index
+        # couples = distances_df.idxmin(axis=1)
+        return t12group
 
     def distance_matrix(self, x):
         if self._dis_mat is None:
@@ -143,5 +148,5 @@ class Matching(Estimator):
 
         balance_df = pd.DataFrame(balance)
         balance_df = balance_df / balance_df.sum(axis=1)[:, None]
-        balance_df.to_csv(f"Balance_{self.name}.csv")
+        balance_df.to_csv(f"Balance_{self.name}_{hash(str(self.match_subset))}.csv")
         self._balance = 1
